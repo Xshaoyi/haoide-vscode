@@ -1,28 +1,42 @@
+/**
+ * @file Express service to start oauth login and parse callback
+ * @author Mouse Liu <mouse.mliu@gmail.com>
+ */
+
+
 import * as express from "express";
 import * as opn from "open";
 import * as vscode from "vscode";
 import * as moment from "moment";
-import * as xmlParser from "fast-xml-parser";
-import { port, entryPoint, appConfig } from "./config";
-import { projectSettings } from "../../../settings";
+import * as nls from 'vscode-nls';
+import * as config from "./config";
 import * as util from "../../../utils/util";
-import { MetadataApi } from "../../api/metadata";
-import { OAuth } from "./oauth";
+import * as contextUtil from "../../../utils/context";
+import MetadataApi from "../../api/metadata";
+import OAuth from "./oauth";
+import { _session, metadata } from "../../../settings";
+
+const localize = nls.loadMessageBundle();
 
 let oauthLoginUrl = "/oauth/login";
 let oauthCallbackUrl = "/oauth/callback";
 
 export function startLogin(url?: string) {
-    url = url || entryPoint + oauthLoginUrl;
+    url = url || config.entryPoint + oauthLoginUrl;
 
     opn(url).catch(_ => {
-        console.log(`Has error when open ${url}`);
+        console.log(localize("errorOpenUrl.text", "Has error when open {0}", url));
     });
 }
 
-export function startServer(projectName: any, loginUrl: string) {
+export interface LoginOptions {
+    projectName: string;
+    loginUrl: string;
+}
+
+export function startServer(options: LoginOptions) {
     return new Promise(function(resolve, reject) {
-        let oauth = new OAuth(loginUrl);
+        let oauth = new OAuth(options.loginUrl);
 
         let app = express();
         app.get(oauthLoginUrl, function(req: any, res: any) {
@@ -33,59 +47,70 @@ export function startServer(projectName: any, loginUrl: string) {
         app.get(oauthCallbackUrl, function (req: any, res: any) {
             const code = req.query.code;
 
-            oauth.requestToken(code).then(function(response) {
-                let body = JSON.parse(response["body"]);
+            oauth.requestToken({code: code}).then( body => {
                 let {userId, organizationId} = util.parseIdUrl(body["id"]);
 
                 // Set the new authorized project as default
-                util.setDefaultProject(projectName);
-
-                // Add project to workspace
-                util.addProjectToWorkspace(projectName);
+                util.setDefaultProject(options.projectName);
 
                 // Write sessionId and refreshToken to local cache
-                let sessionInfo = {
+                let session = {
                     "orgnizationId": organizationId,
                     "userId": userId,
                     "sessionId": body["access_token"],
                     "refreshToken": body["refresh_token"],
                     "instanceUrl": body["instance_url"],
-                    "loginUrl": loginUrl,
+                    "loginUrl": options.loginUrl,
+                    "projectName": options.projectName,
                     "lastUpdatedTime": moment().format()
                 };
-                projectSettings.setSessionInfo(sessionInfo);
+                _session.setSession(session);
 
                 // Describe metadata
-                let metadataApi = new MetadataApi(sessionInfo);
-                metadataApi._invoke_method("DescribeMetadata")
-                    .then(function(response) {
-                        let result = xmlParser.parse(response["body"]);
-                        projectSettings.setConfigValue(
-                            "metadata.json", 
-                            result["soapenv:Envelope"]["soapenv:Body"]["describeMetadataResponse"]["result"]
-                        );
+                new MetadataApi(session).describeMetadata({})
+                    .then( result => {
+                        metadata.setMetaObjects(result);
                     })
                     .catch(err => {
                         console.error(err);
+                        return vscode.window.showErrorMessage(err);
                     });
 
                 // Login successful message
-                vscode.window.showInformationMessage("You have been successfully login.");
+                vscode.window.showInformationMessage(localize(
+                    "successLogin.text", 
+                    "You have been successfully login."
+                ));
+
+                // Create new workspace and add this project into it
+                // and then, open this workspace
+                util.createNewWorkspace(options.projectName);
+
+                // Set context key
+                contextUtil.setHasOpenProject();
 
                 // Redirect to salesforce home page
-                res.redirect(`${sessionInfo["instanceUrl"]}/home/home.jsp`);
+                res.redirect(`${session["instanceUrl"]}/home/home.jsp`);
             })
             .catch(err => {
-                let errorMsg = `There has problem with login: ${err}`;
-                console.error(errorMsg);
+                console.error(err);
+                let errorMsg = localize("errorLogin.text", "There has problem with login: {0}", err);
                 vscode.window.showErrorMessage(errorMsg);
             });
         });
 
-        app.listen(port, () => {
-            resolve(`Server started at ${entryPoint}`);
-        }).on('error', function(err) {
-            resolve(`Server is already started at ${entryPoint}`);
+        app.listen(config.port, () => {
+            resolve(localize(
+                "serverStartAt.text", 
+                "Server started at {0}", 
+                config.entryPoint
+            ));
+        }).on('error', err => {
+            resolve(localize(
+                "serverStartedAt.text", 
+                "Server is already started at {0}", 
+                config.entryPoint
+            ));
         });
     });
 }

@@ -1,3 +1,10 @@
+/**
+ * @file soap body builder
+ * @author Mouse Liu <mouse.mliu@gmail.com>
+ */
+
+import * as _ from "lodash";
+
 export default class SOAP {
     private sessionId: string;
     private apiVerson: number;
@@ -10,12 +17,12 @@ export default class SOAP {
     /**
      *  
      * @param requestType request type, available values should be, [
-     *                          "DescribeMetadata", 
-     *                          "CheckStatus",
-     *                          "CheckRetrieveStatus",
-     *                          "CancelDeployment", 
-     *                          "CheckDeployStatus"
-     *                     ]
+     *     "DescribeMetadata", 
+     *     "CheckStatus",
+     *     "CheckRetrieveStatus",
+     *     "CancelDeployment", 
+     *     "CheckDeployStatus"
+     * ]
      * @param options options, for example, {"types": {"CustomObject": ["Account"]}, "asyncProcessId": ""}
      */
     public getRequestBody(requestType: string, options = {}) {
@@ -48,6 +55,11 @@ export default class SOAP {
         return requestEnvelope;
     }
 
+    /**
+     * Create metadata describe request body by spcified api version
+     * 
+     * @returns soap body for metadata describe request
+     */
     private createDescribeMetadataRequest() {
         let soapBody = `
             <met:describeMetadata>
@@ -60,8 +72,9 @@ export default class SOAP {
 
     /**
      * Before v31.0, we need to invoke check_status before check_retrieve_status
+     * 
      * @param options {"asyncProcessId": string}
-     * @returns Soap body for ``Check Status`` request
+     * @returns Soap body for ```Check Status``` request
      */
     private createCheckStatusRequest(options: any={}) {
         let soapBody = `
@@ -75,8 +88,9 @@ export default class SOAP {
 
     /**
      * Build soap body for retrieve status check operation
+     * 
      * @param options {"asyncProcessId": string}
-     * @returns Soap body for ``Check Retrieve Status`` request
+     * @returns Soap body for ```Check Retrieve Status``` request
      */
     private createCheckRetrieveStatusRequest(options: any={}) {
         let soapBody = `
@@ -90,8 +104,9 @@ export default class SOAP {
     
     /**
      * Build soap body for deployment cancel operation
+     * 
      * @param options {"asyncProcessId": string}
-     * @returns Soap body for ``Check Retrieve Status`` request
+     * @returns Soap body for ```Check Retrieve Status``` request
      */
     private createCancelDeployRequest(options: any={}) {
         let soapBody = `
@@ -105,15 +120,18 @@ export default class SOAP {
 
     /**
      * Build soap body for deployment check operation
-     * @param options {"asyncProcessId": string}
-     * @param includeDetails true means including deploy details in the deployment result
-     * @returns Soap body for ``Check Retrieve Status`` request
+     * 
+     * @param options {
+     *      "asyncProcessId": string,
+     *      "includeDetails": true | false
+     * }
+     * @returns Soap body for ```Check Retrieve Status``` request
      */
-    private createCheckDeployStatusRequest(options: any={}, includeDetails=true) {
+    private createCheckDeployStatusRequest(options: any={}) {
         let soapBody = `
             <met:checkDeployStatus>
                 <met:asyncProcessId>${options["asyncProcessId"]}</met:asyncProcessId>
-                <met:includeDetails>${includeDetails}</met:includeDetails>
+                <met:includeDetails>${options["includeDetails"] || true}</met:includeDetails>
             </met:checkDeployStatus>
         `;
 
@@ -121,37 +139,32 @@ export default class SOAP {
     }
 
     /**
+     * Build soap body for listPackage request
      * 
-     * @param options {"asyncProcessId": string}
-     * @param includeDetails true means including deploy details in the deployment result
-     * @returns Soap body for ``Check Retrieve Status`` request
+     * @param options {"types": any}
+     * @returns Soap body for ```listMetadata`` request
      */
-    private createListPackageRequest(options: any) {
-        let queries = [];
-        let types = options["types"];
-
-        for (const _type in types) {
-            if (types.hasOwnProperty(_type)) {
-                const folders = types[_type];
-                for (const folder of folders) {
-                    if (!folder) {
-                        queries.push(`
-                            <met:queries>
-                                <met:type>${_type}</met:type>
-                            </met:queries>
-                        `);
-                    }
-                    else {
-                        queries.push(`
-                            <met:queries>
-                                <met:type>${_type}</met:type>
-                                <met:folder>${folder}</met:folder>
-                            </met:queries>
-                        `);
-                    }
+    private createListMetadataRequest(options: any) {
+        let queries: string[] = [];
+        _.map(options["types"], (folders, _type) => {
+            for (const folder of folders) {
+                if (!folder) {
+                    queries.push(`
+                        <met:queries>
+                            <met:type>${_type}</met:type>
+                        </met:queries>
+                    `);
+                }
+                else {
+                    queries.push(`
+                        <met:queries>
+                            <met:type>${_type}</met:type>
+                            <met:folder>${folder}</met:folder>
+                        </met:queries>
+                    `);
                 }
             }
-        }
+        });
 
         let soapBody =  `
             <met:listMetadata>
@@ -165,41 +178,42 @@ export default class SOAP {
 
     /**
      * Build soap body for retrieve request
-     * @param options for example, {"types": {"CustomObject": ["Account"]}}
-     * @returns soap body for ``retrieve request``
+     * 
+     * @param options for example, {
+     *      "types" : {"ApexClass": ["*"], "ApexTrigger": ["A", "B"]},
+     *      "packageNames": Array<string>,
+     *      "retrieveAll": boolean
+     * }
+     * @returns soap body for ```retrieve request```
      */
     private createRetrieveRequest(options: any) {
-        let packages = "";
+        let packages: string[] = [];
         if (options["packageNames"]) {
-            packages = options["packageNames"].map( (pn: string) => {
+            packages = _.map(options["packageNames"], (pn: string) => {
                 return `<met:packageNames>${pn}</met:packageNames>`;
+            });
+        }
+
+        let metadataObjects: string[] = [];
+        _.map(options["types"], (members, xmlName) => {
+            let membersStr = members.map((m: string) => {
+                return `<met:members>${m}</met:members>`;
             }).join("");
-        }
 
-        let metadataObjects = [];
-        let types = options["types"];
-        for (const metaName in types) {
-            if (types.hasOwnProperty(metaName)) {
-                const members: any = types[metaName];
-                let membersStr = members.map( (m: string) => {
-                    return `<met:members>${m}</met:members>`;
-                }).join("");
-
-                metadataObjects.push(
-                    `<met:types>
-                        ${membersStr}
-                        <name>${metaName}</name>
-                    </met:types>`
-                );
-            }
-        }
+            metadataObjects.push(
+                `<met:types>
+                    ${membersStr}
+                    <name>${xmlName}</name>
+                </met:types>`
+            );
+        });
 
         let soapBody = `
             <met:retrieve>
                 <met:retrieveRequest>
                     <met:apiVersion>${this.apiVerson}.0</met:apiVersion>
-                    ${packages}
-                    <met:unpackaged>${metadataObjects}</met:unpackaged>
+                    ${packages.join("")}
+                    <met:unpackaged>${metadataObjects.join("")}</met:unpackaged>
                 </met:retrieveRequest>
             </met:retrieve>
         `;
@@ -209,25 +223,27 @@ export default class SOAP {
 
     /**
      * Build soap body for deploy request
+     * 
      * @param zipFile base64 encoded package to be deployed
      * @param options deploy options, for example, {"checkOnly", true, ...}
-     * @returns soap body for ``deploy request``
+     * @returns soap body for ```deploy request```
      */
-    private createDeployRequest(zipFile: string, options:any) {
+    private createDeployRequest(options:any) {
+        let deployOptions = options["deployOptions"];
         let soapBody = `
             <met:deploy>
-                <met:ZipFile>${zipFile}</met:ZipFile>
+                <met:ZipFile>${options["zipfile"]}</met:ZipFile>
                 <met:DeployOptions>
-                    <met:allowMissingFiles>${options["allowMissingFiles"]}</met:allowMissingFiles>
-                    <met:autoUpdatePackage>${options["autoUpdatePackage"]}</met:autoUpdatePackage>
-                    <met:checkOnly>${options["checkOnly"]}</met:checkOnly>
-                    <met:ignoreWarnings>${options["ignoreWarnings"]}</met:ignoreWarnings>
-                    <met:performRetrieve>${options["performRetrieve"]}</met:performRetrieve>
-                    <met:purgeOnDelete>${options["purgeOnDelete"]}</met:purgeOnDelete>
-                    <met:rollbackOnError>${options["rollbackOnError"]}</met:rollbackOnError>
-                    <met:testLevel>${options["testLevel"]}</met:testLevel>
+                    <met:allowMissingFiles>${deployOptions["allowMissingFiles"]}</met:allowMissingFiles>
+                    <met:autoUpdatePackage>${deployOptions["autoUpdatePackage"]}</met:autoUpdatePackage>
+                    <met:checkOnly>${deployOptions["checkOnly"]}</met:checkOnly>
+                    <met:ignoreWarnings>${deployOptions["ignoreWarnings"]}</met:ignoreWarnings>
+                    <met:performRetrieve>${deployOptions["performRetrieve"]}</met:performRetrieve>
+                    <met:purgeOnDelete>${deployOptions["purgeOnDelete"]}</met:purgeOnDelete>
+                    <met:rollbackOnError>${deployOptions["rollbackOnError"]}</met:rollbackOnError>
+                    <met:testLevel>${deployOptions["testLevel"]}</met:testLevel>
                         ${options["runTests"]}
-                    <met:singlePackage>${options["singlePackage"]}</met:singlePackage>
+                    <met:singlePackage>${deployOptions["singlePackage"]}</met:singlePackage>
                 </met:DeployOptions>
             </met:deploy>
         `;
@@ -237,6 +253,7 @@ export default class SOAP {
 
     /**
      * Build apex soap request envelope
+     * 
      * @param soapBody soap body string
      * @param options for example, {"logLevels": []}
      */
@@ -289,7 +306,9 @@ export default class SOAP {
 
     /**
      * Build soap body for run all test request
+     * 
      * @param options reserved params
+     * @returns soap body for runAllTest request
      */
     private createRunAllTestRequest(options: any) {
         let soapBody = `
@@ -304,7 +323,10 @@ export default class SOAP {
     }
 
     /**
-     * Partner API Request Envelope
+     * Wrap soapBody into partner envelope
+     * 
+     * @param soapBody soap body to be wrapped
+     * @returns wrapped partner request body
      */
     private createPartnerEnvelope(soapBody:string) {
         let partnerRequestEnvelope = `<soapenv:Envelope 
@@ -325,7 +347,9 @@ export default class SOAP {
 
     /**
      * Build soap body for layout describe reqeust
+     * 
      * @param options sobject & RecordTypeId pairs
+     * @returns soap body for layout describe request
      */
     private createDescribeLayoutRequest(options: any) {
         let soapBody = `
